@@ -68,7 +68,7 @@ Features que justifican el upgrade del Hobby al Pro tier. Cobramos por data coll
 
 ## v2 — Big bets
 
-- **Windows + Linux polish**: hoy técnicamente corre pero el header (`titleBarStyle: Overlay`, `pl-24`) es macOS-specific. Crear layout cross-platform, manejo de Windows controls (top-right).
+- ~~**Windows + Linux polish**~~ — descartado para alpha/v1. macOS-only se queda. Reconsiderar solo si usuarios reales lo piden con fuerza.
 - **Docker GUI mode (heavy)**: tab separada con todos los containers/images/volumes/networks. **Riesgo**: scope creep, pierde foco. Solo si usuarios lo piden con fuerza.
 - **Cloud sync**: configuración compartida entre máquinas para developers que trabajan en multiple devices. Requiere account/auth → cambio de modelo de negocio (free local → freemium).
 - **Auto-update mechanism**: feed de releases, prompt para actualizar dentro de la app.

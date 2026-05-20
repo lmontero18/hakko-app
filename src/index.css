@@ -1,0 +1,59 @@
+@import "tailwindcss";
+@import "@xterm/xterm/css/xterm.css";
+
+@theme {
+  --font-sans:
+    "Satoshi", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+    "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono:
+    ui-monospace, "SF Mono", Menlo, Monaco, Consolas, "Liberation Mono",
+    "Courier New", monospace;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background-color: var(--color-zinc-950);
+  color: var(--color-zinc-100);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  cursor: default;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-app-region: drag;
+  app-region: drag;
+}
+
+body :is(button, a, input, select, textarea, label, [role="button"]) {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+button:not(:disabled),
+a,
+label,
+select,
+[role="button"] {
+  cursor: pointer;
+}
+
+input,
+textarea {
+  cursor: text;
+}
+
+input,
+textarea,
+.xterm,
+.xterm * {
+  user-select: text;
+  -webkit-user-select: text;
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Loader2, Network } from "lucide-react";
 import { HakkoLogo } from "./components/HakkoLogo";
 import { confirm, open } from "@tauri-apps/plugin-dialog";
@@ -12,6 +12,8 @@ import { PortsPanel } from "./components/PortsPanel";
 import { useProjects } from "./hooks/useProjects";
 import { useDragDrop } from "./hooks/useDragDrop";
 import { useServiceEvents } from "./hooks/useServiceEvents";
+import { useEditors } from "./hooks/useEditors";
+import { useTerminals } from "./hooks/useTerminals";
 import { api, isTauri } from "./lib/tauri";
 import { toast } from "./store/toast";
 import { Toaster } from "./components/Toaster";
@@ -31,6 +33,8 @@ function App() {
     deleteFolder,
     deleteProject,
     updateProject,
+    restartService,
+    markPendingRestart,
   } = useProjects();
 
   const [pendingDetection, setPendingDetection] =
@@ -42,49 +46,54 @@ function App() {
   } | null>(null);
   const [portsOpen, setPortsOpen] = useState(false);
 
+  const loadEditors = useEditors((s) => s.load);
+  const loadTerminals = useTerminals((s) => s.load);
   useEffect(() => {
     load();
-  }, [load]);
+    void loadEditors();
+    void loadTerminals();
+  }, [load, loadEditors, loadTerminals]);
 
   useServiceEvents();
 
-  const isQuittingRef = useRef(false);
   useEffect(() => {
     if (!isTauri()) return;
     let unlisten: (() => void) | undefined;
 
     getCurrentWindow()
       .onCloseRequested(async (event) => {
-        if (isQuittingRef.current) return;
+        // Always prevent Tauri's default close — we take ownership of the
+        // lifecycle and call destroy() ourselves when ready. This avoids
+        // edge cases where preventDefault() detection misfires with
+        // titleBarStyle: "Overlay" on macOS.
+        event.preventDefault();
 
-        const currentStates = useProjects.getState().states;
-        const running = Object.values(currentStates).filter(
+        const running = Object.values(useProjects.getState().states).filter(
           (s) => s.status === "running" || s.status === "starting",
         );
 
-        if (running.length === 0) return;
+        if (running.length > 0) {
+          const label =
+            running.length === 1
+              ? "1 service"
+              : `${running.length} services`;
+          const ok = await confirm(
+            `${label} currently running will be stopped before Hakko quits.`,
+            {
+              title: "Quit Hakko?",
+              kind: "warning",
+              okLabel: "Stop & Quit",
+              cancelLabel: "Cancel",
+            },
+          );
+          if (!ok) return; // user cancelled — keep window open
+          await Promise.allSettled(
+            running.map((s) => api.stopService(s.serviceId)),
+          );
+        }
 
-        event.preventDefault();
-
-        const label =
-          running.length === 1 ? "1 service" : `${running.length} services`;
-        const ok = await confirm(
-          `${label} currently running will be stopped before Hakko quits.`,
-          {
-            title: "Quit Hakko?",
-            kind: "warning",
-            okLabel: "Stop & Quit",
-            cancelLabel: "Cancel",
-          },
-        );
-
-        if (!ok) return;
-
-        isQuittingRef.current = true;
-        await Promise.allSettled(
-          running.map((s) => api.stopService(s.serviceId)),
-        );
-        await getCurrentWindow().close();
+        // destroy() bypasses closeRequested, no recursive loop possible.
+        await getCurrentWindow().destroy();
       })
       .then((fn) => {
         unlisten = fn;
@@ -208,6 +217,11 @@ function App() {
     setEditing({ project, service });
   }
 
+  function handleRestartService(_project: Project, service: Service) {
+    toast.info(`Restarting ${service.name}…`);
+    void restartService(service);
+  }
+
   async function handleRenameProject(project: Project, newName: string) {
     try {
       await updateProject({ ...project, name: newName });
@@ -218,6 +232,14 @@ function App() {
 
   async function handleSaveEditedService(updated: Service) {
     if (!editing) return;
+    const previous = editing.service;
+    const isRunning =
+      states[updated.id]?.status === "running" ||
+      states[updated.id]?.status === "starting";
+    const portChanged = previous.port !== updated.port;
+    const commandChanged = previous.command !== updated.command;
+    const cmdRelevantChange = portChanged || commandChanged;
+
     const newProject: Project = {
       ...editing.project,
       services: editing.project.services.map((s) =>
@@ -226,7 +248,14 @@ function App() {
     };
     try {
       await updateProject(newProject);
-      toast.success(`Updated "${updated.name}"`);
+      if (isRunning && cmdRelevantChange) {
+        markPendingRestart(updated.id);
+        toast.info(
+          `"${updated.name}" updated. Restart it to apply ${portChanged ? "port" : "command"} changes.`,
+        );
+      } else {
+        toast.success(`Updated "${updated.name}"`);
+      }
     } catch (e) {
       toast.error(String(e));
     }
@@ -303,6 +332,7 @@ function App() {
                   onDeleteProject={handleDeleteProject}
                   onEditService={handleEditService}
                   onRenameProject={handleRenameProject}
+                  onRestartService={handleRestartService}
                 />
               ))}
             </div>

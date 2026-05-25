@@ -29,6 +29,8 @@ export interface ServiceState {
   status: ServiceStatus;
   pid?: number;
   startedAt?: string;
+  /** Port sniffed from logs at runtime; falls back to service.port if absent. */
+  actualPort?: number;
 }
 
 export interface DetectionResult {

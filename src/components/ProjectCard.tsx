@@ -29,6 +29,7 @@ interface Props {
   onDeleteProject: (project: Project) => void;
   onEditService: (project: Project, service: Service) => void;
   onRenameProject: (project: Project, newName: string) => void | Promise<void>;
+  onRestartService: (project: Project, service: Service) => void;
 }
 
 function aggregateStatus(
@@ -68,6 +69,7 @@ export function ProjectCard({
   onDeleteProject,
   onEditService,
   onRenameProject,
+  onRestartService,
 }: Props) {
   const [expanded, setExpanded] = useState(false);
   const [activeLogServiceId, setActiveLogServiceId] = useState<string | null>(
@@ -221,6 +223,7 @@ export function ProjectCard({
                   onDeleteService={(service) => onDeleteService(project, service)}
                   onDeleteFolder={(folder) => onDeleteFolder(project, folder)}
                   onEditService={(service) => onEditService(project, service)}
+                  onRestartService={(service) => onRestartService(project, service)}
                 />
               ))}
 

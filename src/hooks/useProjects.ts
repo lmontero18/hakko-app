@@ -6,9 +6,13 @@ import type { DetectionResult, Project, Service, ServiceState } from "../lib/typ
 interface ProjectsStore {
   projects: Project[];
   states: Record<string, ServiceState>;
+  /** Service IDs whose running config differs from saved (user-edited mid-run). */
+  pendingRestart: Set<string>;
   loading: boolean;
 
   load: () => Promise<void>;
+  markPendingRestart: (serviceId: string) => void;
+  clearPendingRestart: (serviceId: string) => void;
   createFromDetection: (detection: DetectionResult) => Promise<Project>;
   addFolderToProject: (
     projectId: string,
@@ -21,6 +25,7 @@ interface ProjectsStore {
 
   startService: (service: Service) => Promise<void>;
   stopService: (service: Service) => Promise<void>;
+  restartService: (service: Service) => Promise<void>;
   refreshRunning: () => Promise<void>;
 
   applyServiceState: (state: ServiceState) => void;
@@ -40,7 +45,20 @@ function isAlive(s: ServiceState | undefined): boolean {
 export const useProjects = create<ProjectsStore>((set, get) => ({
   projects: [],
   states: {},
+  pendingRestart: new Set(),
   loading: false,
+
+  markPendingRestart(serviceId) {
+    set((s) => ({ pendingRestart: new Set([...s.pendingRestart, serviceId]) }));
+  },
+  clearPendingRestart(serviceId) {
+    set((s) => {
+      if (!s.pendingRestart.has(serviceId)) return s;
+      const next = new Set(s.pendingRestart);
+      next.delete(serviceId);
+      return { pendingRestart: next };
+    });
+  },
 
   async load() {
     if (!isTauri()) {
@@ -148,19 +166,28 @@ export const useProjects = create<ProjectsStore>((set, get) => ({
   },
 
   async startService(service) {
-    // Optimistic
+    // Starting fresh — config is now in sync with what's running.
+    get().clearPendingRestart(service.id);
+    // Optimistic "starting" — keep any prior fields if they exist.
     set((s) => ({
       states: {
         ...s.states,
-        [service.id]: { serviceId: service.id, status: "starting" },
+        [service.id]: {
+          ...s.states[service.id],
+          serviceId: service.id,
+          status: "starting",
+        },
       },
     }));
     try {
       const pid = await api.startService(service.id);
+      // Merge into whatever the backend's service-status event already set
+      // (notably `actualPort` which arrives via event before this resolves).
       set((s) => ({
         states: {
           ...s.states,
           [service.id]: {
+            ...s.states[service.id],
             serviceId: service.id,
             status: "running",
             pid,
@@ -182,6 +209,7 @@ export const useProjects = create<ProjectsStore>((set, get) => ({
   async stopService(service) {
     try {
       await api.stopService(service.id);
+      get().clearPendingRestart(service.id);
       set((s) => ({
         states: {
           ...s.states,
@@ -190,6 +218,23 @@ export const useProjects = create<ProjectsStore>((set, get) => ({
       }));
     } catch (e) {
       toast.error(`Failed to stop ${service.name}: ${e}`);
+    }
+  },
+
+  async restartService(service) {
+    try {
+      await api.stopService(service.id);
+      // Wait for the backend to fully finalize the process (waiter task
+      // sends `service-status` Stopped/Crashed when done). Poll briefly.
+      const deadline = Date.now() + 8000;
+      while (Date.now() < deadline) {
+        const status = get().states[service.id]?.status;
+        if (status !== "running" && status !== "starting") break;
+        await new Promise((r) => setTimeout(r, 200));
+      }
+      await get().startService(service);
+    } catch (e) {
+      toast.error(`Failed to restart ${service.name}: ${e}`);
     }
   },
 

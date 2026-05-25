@@ -11,6 +11,7 @@ interface Props {
   onDeleteService: (service: Service) => void;
   onDeleteFolder: (folderLabel: string) => void;
   onEditService: (service: Service) => void;
+  onRestartService: (service: Service) => void;
 }
 
 export function FolderGroup({
@@ -22,6 +23,7 @@ export function FolderGroup({
   onDeleteService,
   onDeleteFolder,
   onEditService,
+  onRestartService,
 }: Props) {
   return (
     <div className="space-y-1">
@@ -48,6 +50,7 @@ export function FolderGroup({
             onViewLogs={onViewLogs}
             onDelete={onDeleteService}
             onEdit={onEditService}
+            onRestart={onRestartService}
           />
         ))}
       </div>

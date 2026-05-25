@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { AlertTriangle, FolderPlus, Plus, X } from "lucide-react";
 import type { DetectionResult, Project } from "../lib/types";
+import { useScrollLock } from "../hooks/useScrollLock";
 
 interface Props {
   detection: DetectionResult | null;
@@ -26,6 +27,8 @@ export function CreateProjectDialog({
   const [mode, setMode] = useState<Mode>("new");
   const [selectedProjectId, setSelectedProjectId] = useState<string>("");
   const [submitting, setSubmitting] = useState(false);
+
+  useScrollLock(detection !== null);
 
   useEffect(() => {
     if (!detection) return;

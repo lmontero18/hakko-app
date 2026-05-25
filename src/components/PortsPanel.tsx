@@ -4,6 +4,7 @@ import { Loader2, RefreshCw, Skull, X } from "lucide-react";
 import { confirm } from "@tauri-apps/plugin-dialog";
 import { api, type PortInfo } from "../lib/tauri";
 import { toast } from "../store/toast";
+import { useScrollLock } from "../hooks/useScrollLock";
 
 interface Props {
   open: boolean;
@@ -14,6 +15,8 @@ export function PortsPanel({ open, onClose }: Props) {
   const [ports, setPorts] = useState<PortInfo[]>([]);
   const [loading, setLoading] = useState(false);
   const [killing, setKilling] = useState<number | null>(null);
+
+  useScrollLock(open);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -41,11 +44,11 @@ export function PortsPanel({ open, onClose }: Props) {
 
   async function handleKill(p: PortInfo, force: boolean) {
     const ok = await confirm(
-      `${p.command} (PID ${p.pid}) is holding port :${p.port}. ${force ? "Force-kill (SIGKILL)" : "Stop gracefully (SIGTERM)"}?`,
+      `${p.command} (PID ${p.pid}) is holding port :${p.port}. ${force ? "Force-kill (SIGKILL) — instant, no cleanup." : "Stop gracefully (SIGTERM) — process gets a chance to clean up."}`,
       {
-        title: force ? "Force-kill process" : "Kill process",
+        title: force ? "Force-kill process?" : "Stop process?",
         kind: "warning",
-        okLabel: force ? "Force-kill" : "Kill",
+        okLabel: force ? "Force-kill" : "Stop",
         cancelLabel: "Cancel",
       },
     );
@@ -152,24 +155,25 @@ export function PortsPanel({ open, onClose }: Props) {
                           {p.address}
                         </td>
                         <td className="px-5 py-2.5 text-right">
-                          <div className="flex items-center justify-end gap-1">
+                          <div className="flex items-center justify-end gap-1.5">
                             <button
                               type="button"
                               onClick={() => void handleKill(p, false)}
                               disabled={killing === p.pid}
-                              className="rounded px-2 py-1 text-xs text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100 disabled:opacity-50"
-                              title="Send SIGTERM (graceful)"
+                              className="rounded-md border border-zinc-800 px-2.5 py-1 text-xs font-medium text-zinc-300 transition-colors hover:border-zinc-700 hover:bg-zinc-800 hover:text-zinc-100 disabled:opacity-50"
+                              title="Graceful stop (SIGTERM) — process gets a chance to clean up"
                             >
-                              Kill
+                              Stop
                             </button>
                             <button
                               type="button"
                               onClick={() => void handleKill(p, true)}
                               disabled={killing === p.pid}
-                              className="rounded p-1 text-zinc-500 hover:bg-rose-500/10 hover:text-rose-400 disabled:opacity-50"
-                              title="Force-kill (SIGKILL)"
+                              className="flex items-center gap-1 rounded-md border border-rose-500/20 bg-rose-500/5 px-2.5 py-1 text-xs font-medium text-rose-400 transition-colors hover:border-rose-500/40 hover:bg-rose-500/15 hover:text-rose-300 disabled:opacity-50"
+                              title="Force-kill (SIGKILL) — instant, no cleanup"
                             >
-                              <Skull className="h-3.5 w-3.5" />
+                              <Skull className="h-3 w-3" />
+                              Force
                             </button>
                           </div>
                         </td>

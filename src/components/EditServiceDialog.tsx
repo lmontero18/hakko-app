@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Lightbulb, X } from "lucide-react";
 import type { Service } from "../lib/types";
+import { useScrollLock } from "../hooks/useScrollLock";
 
 interface Props {
   service: Service | null;
@@ -21,6 +22,8 @@ export function EditServiceDialog({
   const [port, setPort] = useState<string>("");
   const [enabled, setEnabled] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+
+  useScrollLock(service !== null);
 
   useEffect(() => {
     if (!service) return;
@@ -158,6 +161,11 @@ export function EditServiceDialog({
                     placeholder="3000"
                     className="w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 font-mono text-sm text-zinc-100 outline-none focus:border-zinc-500"
                   />
+                  <p className="text-[11px] leading-relaxed text-zinc-500">
+                    Injected as <code className="rounded bg-zinc-800 px-1 font-mono text-zinc-300">PORT</code> env
+                    var. Next.js, Vite, Strapi respect it. Django/Rails need it
+                    in the command itself.
+                  </p>
                 </label>
 
                 <label className="flex cursor-pointer items-center gap-2 self-end pb-2.5">

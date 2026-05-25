@@ -39,7 +39,29 @@ export const api = {
 
   killPortProcess: (pid: number, force: boolean) =>
     invoke<void>("kill_port_process", { pid, force }),
+
+  listAvailableEditors: () =>
+    invoke<EditorInfo[]>("list_available_editors"),
+
+  openInEditor: (editorName: string, path: string) =>
+    invoke<void>("open_in_editor", { editorName, path }),
+
+  listAvailableTerminals: () =>
+    invoke<TerminalInfo[]>("list_available_terminals"),
+
+  openInTerminal: (terminalName: string, path: string) =>
+    invoke<void>("open_in_terminal", { terminalName, path }),
 };
+
+export interface EditorInfo {
+  id: string;
+  name: string;
+}
+
+export interface TerminalInfo {
+  id: string;
+  name: string;
+}
 
 export interface PortInfo {
   port: number;

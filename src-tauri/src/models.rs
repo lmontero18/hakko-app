@@ -54,6 +54,10 @@ pub struct ServiceState {
     pub pid: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub started_at: Option<String>,
+    /// Actual port the service is listening on, sniffed from log lines.
+    /// Falls back to the configured `service.port` if not detected.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub actual_port: Option<u16>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

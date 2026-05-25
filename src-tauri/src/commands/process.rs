@@ -1,12 +1,64 @@
 use std::process::Stdio;
+use std::sync::LazyLock;
 use std::time::Duration;
 
 use chrono::Utc;
+use regex::Regex;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::io::{AsyncBufReadExt, AsyncRead, BufReader};
+use tokio::net::TcpListener;
 use tokio::process::Command;
 use tokio::sync::oneshot;
 use tokio::time::timeout;
+
+/// Matches any `host:port` token the typical dev server prints in its
+/// startup logs (Vite, Next, Strapi, Django, Rails, etc.).
+static PORT_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]):(\d{2,5})")
+        .expect("port regex must compile")
+});
+
+fn sniff_port(line: &str) -> Option<u16> {
+    PORT_REGEX
+        .captures(line)
+        .and_then(|caps| caps.get(1)?.as_str().parse::<u16>().ok())
+        .filter(|&p| p > 0)
+}
+
+/// Checks if `port` can be bound by both an IPv4 and an IPv6 wildcard
+/// listener. macOS (and Linux without IPV6_V6ONLY=0) treats these as
+/// independent sockets, so a process on `[::]:3000` does NOT block a bind
+/// to `127.0.0.1:3000`. We need to check both to catch every case.
+async fn is_port_free(port: u16) -> bool {
+    let v4 = TcpListener::bind(("0.0.0.0", port)).await;
+    if v4.is_err() {
+        return false;
+    }
+    let v6 = TcpListener::bind(("::", port)).await;
+    v6.is_ok()
+}
+
+/// Starts at `start` and walks up looking for a free TCP port.
+/// Tries `start`, `start+1`, ..., up to 30 candidates. Returns the first
+/// fully-free port (both IPv4 and IPv6 wildcards bindable).
+///
+/// Used to auto-shift dev servers off conflicting ports — if user asks for
+/// 3000 but it's taken, we'll inject PORT=3001, etc.
+async fn find_available_port(start: u16) -> Option<u16> {
+    const MAX_TRIES: u16 = 30;
+    for offset in 0..MAX_TRIES {
+        let Some(p) = start.checked_add(offset) else {
+            break;
+        };
+        if p == 0 {
+            continue;
+        }
+        if is_port_free(p).await {
+            return Some(p);
+        }
+    }
+    None
+}
 
 use crate::commands::storage;
 use crate::models::{LogPayload, Service, ServiceState, ServiceStatus};
@@ -91,6 +143,20 @@ pub async fn start_service(
         .kill_on_drop(true)
         .env("PATH", enriched_path());
 
+    // Auto-inject PORT env var when configured. If the configured port is
+    // already taken, walk up (3000 → 3001 → 3002 …) until we find a free
+    // one. Most modern dev servers (Next.js, Vite, CRA, Strapi, custom
+    // Node) respect PORT. User-set env below takes precedence.
+    let effective_port = if let Some(configured) = service.port {
+        let resolved = find_available_port(configured)
+            .await
+            .unwrap_or(configured);
+        command.env("PORT", resolved.to_string());
+        Some(resolved)
+    } else {
+        None
+    };
+
     if let Some(env) = &service.env {
         for (k, v) in env {
             command.env(k, v);
@@ -127,6 +193,10 @@ pub async fn start_service(
         status: ServiceStatus::Running,
         pid: Some(pid),
         started_at: Some(Utc::now().to_rfc3339()),
+        // Pre-populate with the resolved port; the log sniffer will keep
+        // this honest if the framework decides to ignore PORT and bind
+        // somewhere else.
+        actual_port: effective_port,
     };
 
     {
@@ -178,6 +248,7 @@ pub async fn start_service(
             status: final_status,
             pid: None,
             started_at: None,
+            actual_port: None,
         };
         let _ = app_for_wait.emit("service-status", final_state);
     });
@@ -196,6 +267,34 @@ fn spawn_drain<R: AsyncRead + Unpin + Send + 'static>(
         loop {
             match lines.next_line().await {
                 Ok(Some(line)) => {
+                    // Sniff a port from this line. If we find one and it
+                    // differs from the cached actual_port, update state +
+                    // emit a service-status event so the UI knows the real
+                    // port (e.g. when configured :3000 falls back to :3001).
+                    if let Some(detected) = sniff_port(&line) {
+                        if let Some(app_state) = app.try_state::<AppState>() {
+                            let updated = {
+                                let mut map = match app_state.processes.lock() {
+                                    Ok(m) => m,
+                                    Err(_) => continue,
+                                };
+                                match map.get_mut(&service_id) {
+                                    Some(handle)
+                                        if handle.state.actual_port
+                                            != Some(detected) =>
+                                    {
+                                        handle.state.actual_port = Some(detected);
+                                        Some(handle.state.clone())
+                                    }
+                                    _ => None,
+                                }
+                            };
+                            if let Some(state) = updated {
+                                let _ = app.emit("service-status", state);
+                            }
+                        }
+                    }
+
                     let payload = LogPayload {
                         service_id: service_id.clone(),
                         line,

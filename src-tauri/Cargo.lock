@@ -1534,6 +1534,7 @@ dependencies = [
  "chrono",
  "dirs 5.0.1",
  "libc",
+ "regex",
  "serde",
  "serde_json",
  "tauri",

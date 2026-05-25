@@ -24,6 +24,10 @@ pub fn run() {
             commands::logs::get_recent_logs,
             commands::ports::list_listening_ports,
             commands::ports::kill_port_process,
+            commands::editors::list_available_editors,
+            commands::editors::open_in_editor,
+            commands::terminals::list_available_terminals,
+            commands::terminals::open_in_terminal,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

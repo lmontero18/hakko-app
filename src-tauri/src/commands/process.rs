@@ -60,6 +60,7 @@ async fn find_available_port(start: u16) -> Option<u16> {
     None
 }
 
+use crate::commands::sessions::{record_session, SessionEntry};
 use crate::commands::storage;
 use crate::models::{LogPayload, Service, ServiceState, ServiceStatus};
 use crate::state::{AppState, ChildHandle};
@@ -110,6 +111,19 @@ fn find_service(service_id: &str) -> Result<Service, String> {
     Err(format!("service {service_id} not found"))
 }
 
+/// (project_id, project_name) for the project that owns `service_id`. Used to
+/// snapshot context onto a tracked session.
+fn find_project_meta(service_id: &str) -> (Option<String>, Option<String>) {
+    if let Ok(projects) = storage::read_db() {
+        for project in projects {
+            if project.services.iter().any(|s| s.id == service_id) {
+                return (Some(project.id), Some(project.name));
+            }
+        }
+    }
+    (None, None)
+}
+
 #[tauri::command]
 pub async fn start_service(
     service_id: String,
@@ -124,6 +138,8 @@ pub async fn start_service(
     }
 
     let service = find_service(&service_id)?;
+    let service_name = service.name.clone();
+    let (project_id, project_name) = find_project_meta(&service_id);
 
     let mut command = if cfg!(windows) {
         let mut c = Command::new("cmd");
@@ -188,11 +204,12 @@ pub async fn start_service(
 
     let (stop_tx, stop_rx) = oneshot::channel::<()>();
 
+    let started_at = Utc::now();
     let initial_state = ServiceState {
         service_id: service_id.clone(),
         status: ServiceStatus::Running,
         pid: Some(pid),
-        started_at: Some(Utc::now().to_rfc3339()),
+        started_at: Some(started_at.to_rfc3339()),
         // Pre-populate with the resolved port; the log sniffer will keep
         // this honest if the framework decides to ignore PORT and bind
         // somewhere else.
@@ -242,6 +259,17 @@ pub async fn start_service(
                 map.remove(&sid);
             }
         }
+
+        let stopped_at = Utc::now();
+        record_session(SessionEntry {
+            project_id,
+            project_name,
+            service_id: sid.clone(),
+            service_name: Some(service_name),
+            started_at: started_at.to_rfc3339(),
+            stopped_at: stopped_at.to_rfc3339(),
+            duration_secs: (stopped_at - started_at).num_seconds(),
+        });
 
         let final_state = ServiceState {
             service_id: sid,

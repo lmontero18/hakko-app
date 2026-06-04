@@ -1,4 +1,4 @@
-# [App Name] — Project Overview
+# Hakko — Project Overview
 
 ## What is this
 
@@ -48,33 +48,55 @@ The defining product decision is **zero manual setup**. The user never writes co
 ### Project structure
 
 ```
-[app-name]/
+hakko/
 ├── src/                          (Frontend)
 │   ├── components/
-│   │   ├── ProjectCard.tsx       — One card per project
-│   │   ├── FolderGroup.tsx       — Group of services within a card, by folder
-│   │   ├── ServiceRow.tsx        — Individual service row
-│   │   ├── LogViewer.tsx         — xterm.js wrapper
-│   │   └── DropZone.tsx          — Drag-and-drop area for folders
+│   │   ├── ProjectCard.tsx          — One card per project
+│   │   ├── FolderGroup.tsx          — Group of services within a card, by folder
+│   │   ├── ServiceRow.tsx           — Individual service row (status, ports, launchers, uptime)
+│   │   ├── LogViewer.tsx            — xterm.js wrapper
+│   │   ├── DropZone.tsx             — Drag-and-drop area for folders
+│   │   ├── CreateProjectDialog.tsx  — New-project / add-to-existing dialog
+│   │   ├── EditServiceDialog.tsx    — Manual service edit (name, command, port, env, enabled)
+│   │   ├── EnvFilesDialog.tsx       — In-app .env editor (WIP, see ENV-MILESTONES.plan.md)
+│   │   ├── PortsPanel.tsx           — Lists listening TCP ports, kill by PID
+│   │   ├── StatusDot.tsx            — Animated status indicator
+│   │   ├── EmptyState.tsx           — Onboarding/empty state with example stacks
+│   │   ├── HakkoLogo.tsx            — Logo
+│   │   └── Toaster.tsx              — Toast notifications
 │   ├── hooks/
-│   │   ├── useProjects.ts        — Zustand store for project list
-│   │   └── useServiceLogs.ts     — Subscribes to Tauri log events
+│   │   ├── useProjects.ts           — Zustand store for project list + pendingRestart set
+│   │   ├── useServiceEvents.ts      — Subscribes to Tauri log/status events
+│   │   ├── useDragDrop.ts           — Folder drag-and-drop handling
+│   │   ├── useEditors.ts            — Discovers installed editors
+│   │   ├── useTerminals.ts          — Discovers installed terminals
+│   │   └── useScrollLock.ts         — Locks body scroll behind modals
 │   ├── lib/
-│   │   ├── tauri.ts              — Typed wrappers around invoke()
-│   │   └── types.ts              — TS interfaces (mirror Rust structs)
+│   │   ├── tauri.ts                 — Typed wrappers around invoke()
+│   │   ├── types.ts                 — TS interfaces (mirror Rust structs)
+│   │   ├── brandIcons.tsx           — Per-stack/brand icons
+│   │   ├── format.ts                — Formatting helpers (uptime, etc.)
+│   │   ├── status.ts                — Status-to-color/label helpers
+│   │   └── dotenv.ts                — .env parse/serialize helpers (WIP)
 │   ├── App.tsx
 │   └── main.tsx
 ├── src-tauri/                    (Backend)
 │   ├── src/
 │   │   ├── main.rs
+│   │   ├── lib.rs                   — App builder, command registration, managed state
 │   │   ├── commands/
 │   │   │   ├── mod.rs
-│   │   │   ├── projects.rs       — CRUD: list/create/update/delete
-│   │   │   ├── detection.rs      — analyze a folder, return detected services
-│   │   │   ├── process.rs        — spawn/stop/list running
-│   │   │   └── storage.rs        — read/write app database
-│   │   ├── state.rs              — AppState (HashMap of running processes)
-│   │   └── models.rs             — Project, Service, ServiceState structs
+│   │   │   ├── projects.rs          — CRUD: list/create/update/delete
+│   │   │   ├── detection.rs         — analyze a folder, return detected services
+│   │   │   ├── process.rs           — spawn/stop/list running, port shifting + sniffing, PATH enrichment
+│   │   │   ├── logs.rs              — get_recent_logs (buffered log retrieval)
+│   │   │   ├── ports.rs             — list_listening_ports / kill_port_process (lsof)
+│   │   │   ├── editors.rs           — list_available_editors / open_in_editor
+│   │   │   ├── terminals.rs         — list_available_terminals / open_in_terminal
+│   │   │   ├── env_files.rs         — read_env_files / write_env_file (WIP .env editor)
+│   │   │   └── storage.rs           — read/write app database (+ legacy dir migration)
+│   │   ├── state.rs                 — AppState (HashMap of running processes + log buffers)
+│   │   └── models.rs                — Project, Service, ServiceState, etc.
 │   ├── Cargo.toml
 │   └── tauri.conf.json
 └── package.json
@@ -111,6 +133,7 @@ interface ServiceState {
   status: ServiceStatus;
   pid?: number;
   startedAt?: string;
+  actualPort?: number;     // real port sniffed from logs at runtime; falls back to service.port if not detected
 }
 ```
 
@@ -120,9 +143,10 @@ Mirror these structs in Rust with `serde::Serialize` + `serde::Deserialize` deri
 
 All app data lives in a single hidden file, managed entirely by the app. The user never sees it, never edits it.
 
-- **Location:** `~/.config/[app-name]/db.json` (or platform equivalent via `dirs` crate)
-- **Format:** JSON serialized by `serde_json`
+- **Location:** `~/.config/Hakko/db.json` (via `dirs::config_dir()`)
+- **Format:** JSON serialized by `serde_json` (pretty-printed)
 - **Contents:** array of projects with all their services
+- **Legacy migration:** on startup, `storage.rs` checks for older config dir names (`Hako`, `env-local-managment`) and renames them to `Hakko` so existing data survives the rename.
 
 The user does not configure persistence. There is no `.yml` file in the project folders. The app is the source of truth.
 
@@ -238,7 +262,7 @@ To add another folder to an existing project: button "+ Add folder" inside the e
 
 ## Rust commands (IPC surface)
 
-The minimum set for v1:
+18 commands total (16 shipped + 2 for the in-progress `.env` editor). Core CRUD + process control:
 
 ```rust
 #[tauri::command]
@@ -274,6 +298,51 @@ async fn stop_service(service_id: String) -> Result<(), String>;
 async fn list_running() -> Result<Vec<ServiceState>, String>;
 ```
 
+Logs, ports, and launchers (added after the initial v1 set):
+
+```rust
+#[tauri::command]
+async fn get_recent_logs(service_id: String) -> Result<Vec<LogPayload>, String>;
+// Returns the buffered log lines for a service (last ~1000), so a re-opened
+// LogViewer can backfill history without re-running the process.
+
+#[tauri::command]
+async fn list_listening_ports() -> Result<Vec<PortInfo>, String>;
+// Enumerates TCP ports in LISTEN state via `lsof` (port, pid, command, address).
+
+#[tauri::command]
+async fn kill_port_process(pid: u32, force: bool) -> Result<(), String>;
+// Sends SIGTERM (or SIGKILL when force = true) to a pid holding a port.
+
+#[tauri::command]
+async fn list_available_editors() -> Result<Vec<EditorInfo>, String>;
+// Detects installed editors (Cursor, VS Code, Zed, JetBrains, etc.), priority-ordered.
+
+#[tauri::command]
+async fn open_in_editor(editor_name: String, path: String) -> Result<(), String>;
+// Opens a service folder in the chosen editor via `open -a`.
+
+#[tauri::command]
+async fn list_available_terminals() -> Result<Vec<TerminalInfo>, String>;
+// Detects installed terminals (Warp, Ghostty, iTerm, Terminal.app, etc.), priority-ordered.
+
+#[tauri::command]
+async fn open_in_terminal(terminal_name: String, path: String) -> Result<(), String>;
+// Opens a service folder in the chosen terminal via `open -a`.
+```
+
+In-app `.env` editor (WIP, registered but feature still landing — see `ENV-MILESTONES.plan.md`):
+
+```rust
+#[tauri::command]
+async fn read_env_files(dir: String) -> Result<Vec<EnvFile>, String>;
+// Reads the real .env / .env.local / .env.example files in a service folder.
+
+#[tauri::command]
+async fn write_env_file(dir: String, name: String, content: String) -> Result<(), String>;
+// Writes back to the real dotenv file on disk (WYSIWYG, 100% local).
+```
+
 ## Log streaming
 
 Spawn child processes with stdout/stderr piped. In a Tokio task, read line-by-line and emit Tauri events:
@@ -299,10 +368,35 @@ listen<LogPayload>('service-log', (event) => {
 });
 ```
 
+Lines are also buffered in Rust (`state.rs`, last ~1000 per service) so a re-opened `LogViewer` can backfill via `get_recent_logs`. Besides `service-log`, the backend emits a `service-status` event on start, on port detection, and on exit (carrying the final `ServiceStatus` and `actualPort`); the frontend `useServiceEvents` hook listens to both.
+
+## Port handling
+
+Spawned dev servers frequently collide on default ports. Hakko handles this in `process.rs`:
+
+- **Auto-shift off busy ports.** If a service has a configured `port` (e.g. Next.js 3000), `find_available_port()` walks upward from it (up to ~30 candidates), checking IPv4 (`0.0.0.0:port`) and IPv6 (`[::]:port`) binds separately (macOS treats them independently), then injects `PORT=<resolved>` into the child's environment. A user-set `service.env` takes precedence over the injected value. Services without a configured port (generic `npm run dev`/`start`) are spawned as-is.
+- **Port sniffing.** Each log line is matched against a regex for `localhost:`, `127.0.0.1:`, `0.0.0.0:`, and `[::1]:` to learn the port the process actually bound to. The detected value is stored as `ServiceState.actualPort` and pushed to the UI via `service-status`.
+- **Display.** `ServiceRow` shows a `:port` button; if `actualPort` differs from the configured `port`, it surfaces a warning. Clicking the port opens `http://localhost:<port>` in the browser.
+- **Ports panel.** A header "Ports" button opens `PortsPanel`, which lists all listening TCP ports (`list_listening_ports` via `lsof`) and lets the user stop a holder gracefully (SIGTERM) or force-kill it (SIGKILL) by PID (`kill_port_process`).
+
+## Editor & terminal launchers
+
+Each service folder can be opened in an external editor or terminal. On load the frontend calls `list_available_editors` / `list_available_terminals`, which scan `/Applications` and `~/Applications` for known apps in priority order (editors: Cursor > VS Code > Zed > JetBrains IDEs > Sublime > Nova > Xcode; terminals: Warp > Ghostty > iTerm > Alacritty > kitty > WezTerm > Hyper > Tabby > Terminal.app). `ServiceRow` exposes icon buttons that call `open_in_editor` / `open_in_terminal`, which launch via `open -a "<name>" "<absolute path>"`.
+
+## Restart to apply
+
+Editing a service's `command` or `port` while it is running does not hot-reload it. `useProjects` tracks a `pendingRestart` set; `ServiceRow` then shows a yellow restart (⟲) control with a "Config changed. Restart to apply." hint. Restarting stops and re-spawns the service with the new config and clears the flag.
+
+## Process spawning details
+
+- The child is detached into its own process session/group (`setsid()` on Unix) and spawned with piped stdout/stderr, null stdin, and `kill_on_drop`.
+- **PATH enrichment:** GUI apps launched from Finder inherit a minimal PATH, so `process.rs` prepends common locations (`/opt/homebrew/{bin,sbin}`, Docker Desktop / OrbStack bundle paths, `~/.local/bin`, `~/.cargo/bin`, `~/.docker/bin`) so `node`, `npm`, `pnpm`, `python`, and `docker` resolve without the user configuring their shell.
+- **Stopping** sends SIGTERM to the whole process group, waits 5s, then escalates to SIGKILL.
+
 ## State management
 
 - **Frontend:** Zustand store holds projects array + ephemeral `runningServices` map (serviceId → status). Updates come from polling `list_running()` on mount + reactive event listeners.
-- **Backend:** `AppState` with `Mutex<HashMap<String, ChildHandle>>` keyed by serviceId. Stored in Tauri's managed state.
+- **Backend:** `AppState` (in `state.rs`) holds the running processes keyed by serviceId plus per-service log ring buffers (last ~1000 lines). Stored in Tauri's managed state behind a `Mutex`.
 
 ## UI/UX principles
 
@@ -313,34 +407,42 @@ listen<LogPayload>('service-log', (event) => {
 - Drag-and-drop is the primary way to add folders. File picker is the secondary path.
 - Editing services is hidden behind a small "edit" icon — most users will never need it
 - Framer Motion for card expand/collapse and modal transitions
+- Running services show live uptime (HH:MM:SS); disabled services are dimmed instead of removed
+- Fixed window: 1280×800, non-resizable, overlay title bar (`tauri.conf.json`)
 - No login, no cloud, no telemetry in v1. Everything local.
 
-## V1 scope (build in this order)
+## V1 scope (status)
 
-1. ✅ Static UI with mock data (current state)
-2. Shared types in TS + Rust mirroring `models.rs`
-3. Storage layer: read/write `db.json`
-4. Auto-detection logic in Rust — the magic
-5. Drag-and-drop + "+ Add folder" UI
-6. Project creation flow with the new/existing dialog
-7. Card expansion with folder grouping
-8. Process spawning: `start_service` / `stop_service` with Tokio
-9. Real-time log streaming with Tauri events + xterm.js
-10. Project rename, service toggle (enable/disable), service delete
-11. Visual polish: animations, status indicators, empty states
+All core v1 milestones are built:
+
+1. ✅ Static UI with mock data
+2. ✅ Shared types in TS + Rust mirroring `models.rs`
+3. ✅ Storage layer: read/write `db.json`
+4. ✅ Auto-detection logic in Rust — the magic
+5. ✅ Drag-and-drop + "+ Add folder" UI
+6. ✅ Project creation flow with the new/existing dialog
+7. ✅ Card expansion with folder grouping
+8. ✅ Process spawning: `start_service` / `stop_service` with Tokio
+9. ✅ Real-time log streaming with Tauri events + xterm.js
+10. ✅ Project rename, service toggle (enable/disable), service delete
+11. ✅ Visual polish: animations, status indicators, empty states
+
+Shipped beyond the original v1 list: port auto-shift + sniffing, ports panel, editor/terminal launchers, open-in-browser, restart-to-apply.
 
 ## Out of scope for v1 (deferred to v2)
 
 - Export config to project folder (for team sharing)
 - Templates ("Next.js + Strapi", "Vite + Express", etc.)
 - System tray + global hotkeys
-- Port conflict detection
+- ~~Port conflict detection~~ — partially shipped: auto-shift off busy ports + `PortsPanel` (list/kill listeners)
 - Per-service environment variable UI
-- `.env` editor inside the app
+- `.env` editor inside the app — **in progress** (`read_env_files`/`write_env_file` + `EnvFilesDialog`, editing real dotenv files on disk; see `ENV-MILESTONES.plan.md`)
 - Auto-update mechanism
 - Code signing for distribution
 - Re-scan folder for new services after initial detection
 - Cloud sync / multi-device
+
+See `ROADMAP.md` for the post-v1 plan (plans/tiers, analytics, CLI companion, etc.).
 
 ## Constraints and conventions
 
@@ -352,10 +454,9 @@ listen<LogPayload>('service-log', (event) => {
 - xterm.js instances are created once per service and kept alive while the card is expanded; logs are buffered in Rust if no listener is active (last 1000 lines)
 - Detection is one-shot at folder-add time. The folder is NOT re-scanned automatically afterward (deferred to v2).
 
-## Naming TODO
+## Identity
 
-The app currently has no name. Once chosen:
-
-- Replace `[App Name]` and `[app-name]` placeholders throughout
-- Update `tauri.conf.json` identifier and product name
-- Decide config directory name (`~/.config/<name>/`)
+- **Product name:** Hakko
+- **Bundle identifier:** `com.luiseduardomonteromolina.hakko` (`tauri.conf.json`)
+- **Config directory:** `~/.config/Hakko/`
+- **Platform:** macOS-only for v1 (Windows/Linux dropped — see `ROADMAP.md`)

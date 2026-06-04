@@ -64,6 +64,9 @@ pub struct ServiceState {
 #[serde(rename_all = "camelCase")]
 pub struct DetectionResult {
     pub folder_label: String,
+    /// Absolute path of the analyzed folder. Used by the frontend to act on
+    /// folder-level warnings (e.g. create a missing `.env`).
+    pub root_path: String,
     pub services: Vec<Service>,
     pub warnings: Vec<String>,
 }

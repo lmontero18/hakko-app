@@ -39,6 +39,7 @@ pub async fn detect_services(path: String) -> Result<DetectionResult, String> {
 
     Ok(DetectionResult {
         folder_label,
+        root_path: path,
         services,
         warnings,
     })

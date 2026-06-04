@@ -1,6 +1,6 @@
 [package]
 name = "hakko"
-version = "0.1.0"
+version = "0.2.0"
 description = "Visual dashboard for local dev environments"
 authors = ["Luis Eduardo Montero Molina"]
 edition = "2021"

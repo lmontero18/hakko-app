@@ -26,6 +26,11 @@ pub fn run() {
             commands::ports::kill_port_process,
             commands::editors::list_available_editors,
             commands::editors::open_in_editor,
+            commands::env_files::read_env_files,
+            commands::env_files::write_env_file,
+            commands::icons::find_project_icon,
+            commands::sessions::get_stats,
+            commands::sessions::get_daily_activity,
             commands::terminals::list_available_terminals,
             commands::terminals::open_in_terminal,
         ])

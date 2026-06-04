@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { Lightbulb, X } from "lucide-react";
+import { FileCog, Lightbulb, X } from "lucide-react";
 import type { Service } from "../lib/types";
 import { useScrollLock } from "../hooks/useScrollLock";
+import { EnvFilesDialog } from "./EnvFilesDialog";
 
 interface Props {
   service: Service | null;
@@ -22,6 +23,7 @@ export function EditServiceDialog({
   const [port, setPort] = useState<string>("");
   const [enabled, setEnabled] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [envOpen, setEnvOpen] = useState(false);
 
   useScrollLock(service !== null);
 
@@ -32,16 +34,20 @@ export function EditServiceDialog({
     setPort(service.port?.toString() ?? "");
     setEnabled(service.enabled);
     setSubmitting(false);
+    setEnvOpen(false);
   }, [service]);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (!service) return;
+      // When the env-files dialog is open it handles Escape itself; don't
+      // let it close this dialog underneath it too.
+      if (envOpen) return;
       if (e.key === "Escape") onClose();
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [service, onClose]);
+  }, [service, onClose, envOpen]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -72,6 +78,7 @@ export function EditServiceDialog({
   }
 
   return (
+    <>
     <AnimatePresence>
       {service && (
         <motion.div
@@ -180,6 +187,20 @@ export function EditServiceDialog({
                   </span>
                 </label>
               </div>
+
+              <div className="border-t border-zinc-800 pt-4">
+                <button
+                  type="button"
+                  onClick={() => setEnvOpen(true)}
+                  className="flex w-full items-center gap-2 rounded-md border border-zinc-800 bg-zinc-950/50 px-3 py-2 text-left text-xs text-zinc-300 transition-colors hover:border-zinc-700 hover:bg-zinc-800/60"
+                >
+                  <FileCog className="h-4 w-4 text-zinc-500" />
+                  <span className="font-medium">Environment files</span>
+                  <span className="ml-auto font-mono text-[11px] text-zinc-500">
+                    .env
+                  </span>
+                </button>
+              </div>
             </div>
 
             <div className="flex justify-end gap-2 border-t border-zinc-800 bg-zinc-950/40 px-5 py-3">
@@ -203,5 +224,10 @@ export function EditServiceDialog({
         </motion.div>
       )}
     </AnimatePresence>
+      <EnvFilesDialog
+        cwd={envOpen && service ? service.cwd : null}
+        onClose={() => setEnvOpen(false)}
+      />
+    </>
   );
 }

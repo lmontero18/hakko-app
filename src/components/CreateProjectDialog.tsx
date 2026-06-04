@@ -13,6 +13,7 @@ interface Props {
     projectId: string,
     detection: DetectionResult,
   ) => Promise<unknown> | void;
+  onCreateEnvFromExample?: (rootPath: string) => Promise<unknown> | void;
 }
 
 type Mode = "new" | "existing";
@@ -23,10 +24,12 @@ export function CreateProjectDialog({
   onClose,
   onCreateNew,
   onAddToExisting,
+  onCreateEnvFromExample,
 }: Props) {
   const [mode, setMode] = useState<Mode>("new");
   const [selectedProjectId, setSelectedProjectId] = useState<string>("");
   const [submitting, setSubmitting] = useState(false);
+  const [creatingEnv, setCreatingEnv] = useState(false);
 
   useScrollLock(detection !== null);
 
@@ -35,6 +38,7 @@ export function CreateProjectDialog({
     setMode("new");
     setSelectedProjectId(projects[0]?.id ?? "");
     setSubmitting(false);
+    setCreatingEnv(false);
   }, [detection, projects]);
 
   useEffect(() => {
@@ -45,6 +49,16 @@ export function CreateProjectDialog({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [detection, onClose]);
+
+  async function handleCreateEnv() {
+    if (!detection || !onCreateEnvFromExample || creatingEnv) return;
+    setCreatingEnv(true);
+    try {
+      await onCreateEnvFromExample(detection.rootPath);
+    } finally {
+      setCreatingEnv(false);
+    }
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -128,8 +142,18 @@ export function CreateProjectDialog({
                       key={w}
                       className="flex items-center gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-xs text-amber-200"
                     >
-                      <AlertTriangle className="h-3.5 w-3.5" />
-                      {w}
+                      <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                      <span className="flex-1">{w}</span>
+                      {onCreateEnvFromExample && w.startsWith("Missing .env") && (
+                        <button
+                          type="button"
+                          onClick={handleCreateEnv}
+                          disabled={creatingEnv}
+                          className="shrink-0 rounded bg-amber-500/20 px-2 py-0.5 font-medium text-amber-100 hover:bg-amber-500/30 disabled:opacity-50"
+                        >
+                          {creatingEnv ? "Creating…" : "Create .env"}
+                        </button>
+                      )}
                     </div>
                   ))}
                 </div>

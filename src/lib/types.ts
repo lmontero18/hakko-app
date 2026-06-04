@@ -35,6 +35,7 @@ export interface ServiceState {
 
 export interface DetectionResult {
   folderLabel: string;
+  rootPath: string;
   services: Service[];
   warnings: string[];
 }

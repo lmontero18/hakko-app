@@ -1,14 +1,16 @@
 import { useCallback, useEffect, useState } from "react";
-import { Loader2, Network } from "lucide-react";
+import { BarChart3, Loader2, Network } from "lucide-react";
 import { HakkoLogo } from "./components/HakkoLogo";
 import { confirm, open } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { DropZone } from "./components/DropZone";
 import { EmptyState } from "./components/EmptyState";
-import { ProjectCard } from "./components/ProjectCard";
+import { ProjectSidebar } from "./components/ProjectSidebar";
+import { ProjectDetail } from "./components/ProjectDetail";
 import { CreateProjectDialog } from "./components/CreateProjectDialog";
 import { EditServiceDialog } from "./components/EditServiceDialog";
 import { PortsPanel } from "./components/PortsPanel";
+import { StatsPanel } from "./components/StatsPanel";
 import { useProjects } from "./hooks/useProjects";
 import { useDragDrop } from "./hooks/useDragDrop";
 import { useServiceEvents } from "./hooks/useServiceEvents";
@@ -45,6 +47,10 @@ function App() {
     service: Service;
   } | null>(null);
   const [portsOpen, setPortsOpen] = useState(false);
+  const [statsOpen, setStatsOpen] = useState(false);
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(
+    null,
+  );
 
   const loadEditors = useEditors((s) => s.load);
   const loadTerminals = useTerminals((s) => s.load);
@@ -55,6 +61,18 @@ function App() {
   }, [load, loadEditors, loadTerminals]);
 
   useServiceEvents();
+
+  // Keep a valid project selected: default to the first, re-point if the
+  // selected one was deleted, and clear when there are no projects.
+  useEffect(() => {
+    if (projects.length === 0) {
+      setSelectedProjectId(null);
+      return;
+    }
+    setSelectedProjectId((cur) =>
+      cur && projects.some((p) => p.id === cur) ? cur : projects[0].id,
+    );
+  }, [projects]);
 
   useEffect(() => {
     if (!isTauri()) return;
@@ -261,6 +279,29 @@ function App() {
     }
   }
 
+  async function handleCreateEnvFromExample(rootPath: string) {
+    try {
+      const files = await api.readEnvFiles(rootPath);
+      const example = files.find((f) => f.name === ".env.example");
+      if (!example) {
+        toast.error("No .env.example found in this folder");
+        return;
+      }
+      await api.writeEnvFile(rootPath, ".env", example.content);
+      toast.success("Created .env from .env.example");
+      setPendingDetection((d) =>
+        d
+          ? {
+              ...d,
+              warnings: d.warnings.filter((w) => !w.startsWith("Missing .env")),
+            }
+          : d,
+      );
+    } catch (e) {
+      toast.error(`Failed to create .env: ${e}`);
+    }
+  }
+
   async function handleDeleteProject(project: Project) {
     const ok = await confirm(
       `Delete project "${project.name}"? This cannot be undone.${aliveSummary(project.services.map((s) => s.id))}`,
@@ -274,79 +315,121 @@ function App() {
     }
   }
 
+  async function handleCreateNew(detection: DetectionResult) {
+    const project = await createFromDetection(detection);
+    setSelectedProjectId(project.id);
+  }
+
+  async function handleAddToExisting(
+    projectId: string,
+    detection: DetectionResult,
+  ) {
+    await addFolderToProject(projectId, detection);
+    setSelectedProjectId(projectId);
+  }
+
+  const selectedProject =
+    projects.find((p) => p.id === selectedProjectId) ?? null;
+
   return (
     <main
       onMouseDown={handleWindowMouseDown}
-      className="min-h-full bg-zinc-950 text-zinc-100"
+      className="flex h-screen flex-col bg-zinc-950 text-zinc-100"
     >
-      <header className="sticky top-0 z-30 select-none border-b border-white/5 bg-zinc-950/40 backdrop-blur-2xl">
-        <div className="mx-auto flex max-w-5xl items-center gap-3 py-3 pl-24 pr-6">
-          <HakkoLogo className="h-5 w-5 text-zinc-100" />
-          <h1 className="text-sm font-semibold tracking-tight">Hakko</h1>
-          <span className="rounded bg-zinc-800 px-1.5 py-0.5 font-mono text-[10px] text-zinc-400">
-            v0.1
-          </span>
-          <div className="ml-auto flex items-center gap-2">
-            {detecting && (
-              <span className="flex items-center gap-1.5 text-xs text-zinc-400">
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                Analyzing…
-              </span>
-            )}
-            <button
-              type="button"
-              onClick={() => setPortsOpen(true)}
-              className="flex items-center gap-1.5 rounded-md border border-zinc-800 bg-zinc-900/60 px-3 py-2 text-sm text-zinc-300 hover:border-zinc-700 hover:bg-zinc-800"
-              title="See open ports"
-            >
-              <Network className="h-4 w-4" />
-              Ports
-            </button>
-            <DropZone onPickFolder={handlePickFolder} compact />
-          </div>
+      <header className="z-30 flex shrink-0 select-none items-center gap-3 border-b border-white/5 bg-zinc-950/40 py-3 pl-24 pr-6 backdrop-blur-2xl">
+        <HakkoLogo className="h-5 w-5 text-zinc-100" />
+        <h1 className="text-sm font-semibold tracking-tight">Hakko</h1>
+        <span className="rounded bg-zinc-800 px-1.5 py-0.5 font-mono text-[10px] text-zinc-400">
+          v0.2
+        </span>
+        <div className="ml-auto flex items-center gap-2">
+          {detecting && (
+            <span className="flex items-center gap-1.5 text-xs text-zinc-400">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              Analyzing…
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={() => setStatsOpen(true)}
+            className="flex items-center gap-1.5 rounded-md border border-zinc-800 bg-zinc-900/60 px-3 py-2 text-sm text-zinc-300 hover:border-zinc-700 hover:bg-zinc-800"
+            title="Time tracking"
+          >
+            <BarChart3 className="h-4 w-4" />
+            Stats
+          </button>
+          <button
+            type="button"
+            onClick={() => setPortsOpen(true)}
+            className="flex items-center gap-1.5 rounded-md border border-zinc-800 bg-zinc-900/60 px-3 py-2 text-sm text-zinc-300 hover:border-zinc-700 hover:bg-zinc-800"
+            title="See open ports"
+          >
+            <Network className="h-4 w-4" />
+            Ports
+          </button>
+          <DropZone onPickFolder={handlePickFolder} compact />
         </div>
       </header>
 
-      <div className="mx-auto max-w-5xl space-y-6 px-6 py-8">
-        {loading ? (
-          <div className="flex items-center justify-center gap-2 py-12 text-sm text-zinc-500">
-            <Loader2 className="h-4 w-4 animate-spin" />
-            Loading projects…
+      {loading ? (
+        <div className="flex flex-1 items-center justify-center gap-2 text-sm text-zinc-500">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          Loading projects…
+        </div>
+      ) : projects.length === 0 ? (
+        <div className="flex-1 overflow-y-auto">
+          <div className="mx-auto max-w-5xl px-6 py-8">
+            <EmptyState onPickFolder={handlePickFolder} isOver={isOver} />
           </div>
-        ) : projects.length === 0 ? (
-          <EmptyState onPickFolder={handlePickFolder} isOver={isOver} />
-        ) : (
-          <>
-            <div className="space-y-3">
-              {projects.map((project) => (
-                <ProjectCard
-                  key={project.id}
-                  project={project}
-                  states={states}
-                  onToggleService={handleToggleService}
-                  onPlayAll={handlePlayAll}
-                  onStopAll={handleStopAll}
-                  onAddFolder={handleAddFolder}
-                  onDeleteService={handleDeleteService}
-                  onDeleteFolder={handleDeleteFolder}
-                  onDeleteProject={handleDeleteProject}
-                  onEditService={handleEditService}
-                  onRenameProject={handleRenameProject}
-                  onRestartService={handleRestartService}
-                />
-              ))}
+        </div>
+      ) : (
+        <div className="flex min-h-0 flex-1">
+          <ProjectSidebar
+            projects={projects}
+            states={states}
+            selectedId={selectedProjectId}
+            onSelect={(id) => setSelectedProjectId(id)}
+            onAdd={handlePickFolder}
+          />
+          {selectedProject ? (
+            <ProjectDetail
+              key={selectedProject.id}
+              project={selectedProject}
+              states={states}
+              onToggleService={handleToggleService}
+              onPlayAll={handlePlayAll}
+              onStopAll={handleStopAll}
+              onAddFolder={handleAddFolder}
+              onDeleteService={handleDeleteService}
+              onDeleteFolder={handleDeleteFolder}
+              onDeleteProject={handleDeleteProject}
+              onEditService={handleEditService}
+              onRenameProject={handleRenameProject}
+              onRestartService={handleRestartService}
+            />
+          ) : (
+            <div className="flex flex-1 items-center justify-center text-sm text-zinc-500">
+              Select a project
             </div>
-            <DropZone onPickFolder={handlePickFolder} isOver={isOver} />
-          </>
-        )}
-      </div>
+          )}
+        </div>
+      )}
+
+      {isOver && projects.length > 0 && (
+        <div className="pointer-events-none fixed inset-0 z-40 flex items-center justify-center bg-zinc-950/70 backdrop-blur-sm">
+          <div className="rounded-xl border-2 border-dashed border-zinc-600 px-8 py-6 text-sm font-medium text-zinc-200">
+            Drop a folder to add a project
+          </div>
+        </div>
+      )}
 
       <CreateProjectDialog
         detection={pendingDetection}
         projects={projects}
         onClose={() => setPendingDetection(null)}
-        onCreateNew={createFromDetection}
-        onAddToExisting={addFolderToProject}
+        onCreateNew={handleCreateNew}
+        onAddToExisting={handleAddToExisting}
+        onCreateEnvFromExample={handleCreateEnvFromExample}
       />
 
       <EditServiceDialog
@@ -362,6 +445,8 @@ function App() {
       />
 
       <PortsPanel open={portsOpen} onClose={() => setPortsOpen(false)} />
+
+      <StatsPanel open={statsOpen} onClose={() => setStatsOpen(false)} />
 
       <Toaster />
     </main>

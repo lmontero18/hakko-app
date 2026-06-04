@@ -51,7 +51,54 @@ export const api = {
 
   openInTerminal: (terminalName: string, path: string) =>
     invoke<void>("open_in_terminal", { terminalName, path }),
+
+  readEnvFiles: (dir: string) => invoke<EnvFile[]>("read_env_files", { dir }),
+
+  writeEnvFile: (dir: string, name: string, content: string) =>
+    invoke<void>("write_env_file", { dir, name, content }),
+
+  findProjectIcon: (dirs: string[]) =>
+    invoke<string | null>("find_project_icon", { dirs }),
+
+  getStats: () => invoke<StatsSummary>("get_stats"),
+
+  getDailyActivity: (projectId: string | null) =>
+    invoke<DayActivity[]>("get_daily_activity", { projectId }),
 };
+
+export interface DayActivity {
+  date: string;
+  totalSecs: number;
+  sessions: number;
+}
+
+export interface ServiceStat {
+  serviceId: string;
+  serviceName: string;
+  totalSecs: number;
+  sessions: number;
+}
+
+export interface ProjectStat {
+  projectId: string;
+  projectName: string;
+  totalSecs: number;
+  weekSecs: number;
+  sessions: number;
+  services: ServiceStat[];
+}
+
+export interface StatsSummary {
+  totalSecs: number;
+  weekSecs: number;
+  totalSessions: number;
+  projects: ProjectStat[];
+}
+
+export interface EnvFile {
+  name: string;
+  content: string;
+}
 
 export interface EditorInfo {
   id: string;
